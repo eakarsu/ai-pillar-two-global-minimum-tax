@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import RecordDialog from './RecordDialog.jsx';
 
 const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(value || 0));
 const pretty = value => String(value || '').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
@@ -62,7 +63,7 @@ function ProfessionalBrief({ result }) {
       <div className="sectionHeading"><span>Recommended action plan</span><small>Prioritized next steps</small></div>
       <ol>{result.actions.map((action, index) => <li key={index}><span>{index + 1}</span><p>{action}</p></li>)}</ol>
     </section>
-    {result.providerNote && <section className="assumption"><strong>Material assumption</strong><RichText text={result.providerNote} compact/></section>}
+    {result.providerNote && <section className="assumption"><strong>Provider assumption</strong><RichText text={result.providerNote} compact/></section>}
     <footer className="briefFooter"><span>OpenRouter · {result.model}</span><span>{result.disclaimer}</span></footer>
   </article>;
 }
@@ -91,6 +92,7 @@ function DomainCapability({ app, featureId, notify }) {
       notify(`${result.message}. ${result.auditDetail}`); setSelected(null); await load();
     } catch (failure) { notify(failure.message); } finally { setBusy(false); }
   }
+  async function recordChanged(message) { notify(message); setSelected(null); await load(); }
   if (!data) return <p>Loading domain capability…</p>;
   const { feature, groups } = data;
   const allRows = groups.flatMap(group => group.items.map(item => ({ item, module: group.module })));
@@ -98,7 +100,7 @@ function DomainCapability({ app, featureId, notify }) {
   const total = allRows.reduce((sum, { item }) => sum + Number(item.amount || 0), 0);
   const renderTable = group => <section className="domainSection" key={group.module.id}><div className="moduleTitle"><div><h3>{group.module.title}</h3><p>{group.module.description}</p></div><span className="badge">{group.items.length} records</span></div><div className="tableWrap"><table><thead><tr><th>Reference</th><th>Status</th><th>Risk</th><th>Owner</th><th>Due</th><th>Value</th>{group.module.columns.slice(0, 4).map(column => <th key={column.dbKey}>{column.label}</th>)}</tr></thead><tbody>{group.items.map(item => <tr className="clickable" key={item.id} onClick={() => setSelected({ module: group.module, item })}><td>{item.reference}</td><td><span className={`status status-${String(item.status).toLowerCase()}`}>{item.status}</span></td><td>{item.risk}</td><td>{item.owner}</td><td>{String(item.due_date).slice(0,10)}</td><td>{money(item.amount)}</td>{group.module.columns.slice(0,4).map(column => <td key={column.dbKey}>{String(item[column.dbKey])}</td>)}</tr>)}</tbody></table></div></section>;
   const board = <div className="kanban">{['Open','Investigating','Review','Approved','Closed'].map(status => <section key={status}><h4>{status}<span>{allRows.filter(({ item }) => item.status === status).length}</span></h4>{allRows.filter(({ item }) => item.status === status).slice(0,8).map(({ item, module }) => <button key={`${module.id}-${item.id}`} onClick={() => setSelected({ item, module })}><strong>{item.reference}</strong><span>{module.title}</span><small>{item.owner} · {item.risk}</small></button>)}</section>)}</div>;
-  return <><PageTitle title={feature.title} subtitle={feature.description}/><div className="capabilityStrip"><Metric label="Controlled records" value={allRows.length}/><Metric label="Require action" value={attention}/><Metric label="Value represented" value={money(total)}/><div className="processNote"><strong>{feature.view === 'reconciliation' ? 'Reconciliation control' : feature.view === 'evidence' ? 'Evidence decision' : feature.view === 'deadline' ? 'Deadline governance' : feature.view === 'control' ? 'Preventive control' : 'Managed workflow'}</strong><span>Every action changes PostgreSQL state and writes an attributed audit event.</span></div></div>{feature.view === 'board' ? board : groups.map(renderTable)}{selected && <Modal title={`${feature.title} · ${selected.item.reference}`} onClose={() => setSelected(null)}><div className="decisionBanner"><strong>Domain decision required</strong><span>{feature.description}</span></div><DetailGrid item={selected.item}/><h4>Permitted {feature.title} actions</h4><div className="buttonRow">{feature.actions.map(action => <button className="primary" disabled={busy} key={action.id} onClick={() => runAction(action)}>{action.label}</button>)}</div><small className="muted">Actions are role-attributed, persisted, and added to the audit trail.</small></Modal>}</>;
+  return <><PageTitle title={feature.title} subtitle={feature.description}/><div className="capabilityStrip"><Metric label="Controlled records" value={allRows.length}/><Metric label="Require action" value={attention}/><Metric label="Value represented" value={money(total)}/><div className="processNote"><strong>{feature.view === 'reconciliation' ? 'Reconciliation control' : feature.view === 'evidence' ? 'Evidence decision' : feature.view === 'deadline' ? 'Deadline governance' : feature.view === 'control' ? 'Preventive control' : 'Managed workflow'}</strong><span>Every action changes PostgreSQL state and writes an attributed audit event.</span></div></div>{feature.view === 'board' ? board : groups.map(renderTable)}{selected && <RecordDialog title={`${feature.title} · ${selected.item.reference}`} module={selected.module} item={selected.item} request={api} onClose={() => setSelected(null)} onChanged={recordChanged}><div className="decisionBanner"><strong>Domain decision required</strong><span>{feature.description}</span></div><h4>Permitted {feature.title} actions</h4><div className="buttonRow">{feature.actions.map(action => <button className="primary" disabled={busy} key={action.id} onClick={() => runAction(action)}>{action.label}</button>)}</div><small className="muted">Actions are role-attributed, persisted, and added to the audit trail.</small></RecordDialog>}</>;
 }
 
 function AIStudio({ app, initialId, notify }) {

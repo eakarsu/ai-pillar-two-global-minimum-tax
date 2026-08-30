@@ -303,6 +303,39 @@ export function createApp() {
     const result = await pool.query(`SELECT * FROM ${identifier(module.table)} ORDER BY due_date`);
     res.json({ module, items: result.rows });
   });
+  app.put('/api/operation-records/:id', async (req, res) => {
+    const module = config.operations.find(item => item.id === req.body?.moduleId);
+    const recordId = Number(req.params.id);
+    if (!module || !Number.isInteger(recordId) || recordId < 1) return res.status(422).json({ error: 'A valid module and record are required' });
+    const values = req.body?.values || {};
+    const allowed = ['status', 'owner', 'risk', 'due_date', 'amount', ...module.columns.map(column => column.dbKey)];
+    const entries = allowed.filter(key => Object.prototype.hasOwnProperty.call(values, key));
+    if (!entries.length) return res.status(422).json({ error: 'No editable fields were supplied' });
+    const parameters = entries.map((key, index) => `${identifier(key)}=$${index + 1}`).join(',');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const updated = await client.query(`UPDATE ${identifier(module.table)} SET ${parameters} WHERE id=$${entries.length + 1} RETURNING *`, [...entries.map(key => values[key]), recordId]);
+      if (!updated.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Operational record not found' }); }
+      await audit(client, req.user.email, 'Record edited', module.title, updated.rows[0].reference, `Updated fields: ${entries.join(', ')}`);
+      await client.query('COMMIT');
+      res.json({ message: 'Record updated', item: updated.rows[0] });
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  });
+  app.delete('/api/operation-records/:id', async (req, res) => {
+    const module = config.operations.find(item => item.id === req.body?.moduleId);
+    const recordId = Number(req.params.id);
+    if (!module || !Number.isInteger(recordId) || recordId < 1) return res.status(422).json({ error: 'A valid module and record are required' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const deleted = await client.query(`DELETE FROM ${identifier(module.table)} WHERE id=$1 RETURNING reference`, [recordId]);
+      if (!deleted.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Operational record not found' }); }
+      await audit(client, req.user.email, 'Record deleted', module.title, deleted.rows[0].reference, 'Deleted through the governed record dialog');
+      await client.query('COMMIT');
+      res.json({ message: 'Record deleted' });
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  });
   app.get('/api/reports', async (_req, res) => {
     const modules = [];
     for (const module of config.operations) {
